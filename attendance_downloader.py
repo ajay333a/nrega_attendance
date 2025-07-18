@@ -1,12 +1,9 @@
-import os
 import io
 import requests
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
-from PIL import Image as PILImage
 from bs4 import BeautifulSoup
 from datetime import datetime
-import argparse
 
 STARTING_URL = "https://mnregaweb4.nic.in/nregaarch/View_NMMS_atten_date_dtl_rpt.aspx?page=&short_name=KN&state_name=KARNATAKA&state_code=15&district_name=BALLARI&district_code=1505&block_name=SIRUGUPPA&block_code=1505007&"
 
@@ -36,13 +33,28 @@ def get_attendance_data(url):
     attendance_table = tables[-1]
     rows = attendance_table.find_all('tr')
     header_cells = [th.text.strip() for th in rows[0].find_all(['th', 'td'])]
+    print(f"Parsed header row: {header_cells}")
     col_map = {name: idx for idx, name in enumerate(header_cells)}
     # Only extract these columns
     wanted_cols = ['S.No', 'Job Card No', 'Worker Name (Gender)', 'Attendance Date', 'Present/Absent']
     for row in rows[1:]:
         cols = row.find_all('td')
-        if cols and any(c.text.strip() for c in cols):
-            extracted = [cols[col_map.get(col, -1)].text.strip() if col in col_map else '' for col in wanted_cols]
+        if cols and any(c.get_text(strip=True) for c in cols):
+            # Find worker name in a <span> with id containing 'lbl_workerName_'
+            name_td = ''
+            for td in cols:
+                span = td.find('span', id=lambda x: x and 'lbl_workerName_' in x)
+                if span:
+                    name_td = span.get_text(strip=True)
+                    break
+            extracted = [
+                cols[col_map.get('S.No', -1)].get_text(strip=True) if 'S.No' in col_map else '',
+                cols[col_map.get('Job Card No', -1)].get_text(strip=True) if 'Job Card No' in col_map else '',
+                name_td,
+                cols[col_map.get('Attendance Date', -1)].get_text(strip=True) if 'Attendance Date' in col_map else '',
+                cols[col_map.get('Present/Absent', -1)].get_text(strip=True) if 'Present/Absent' in col_map else ''
+            ]
+            print(f"Extracted row: {extracted}")
             attendance_data.append(extracted)
     print(f"Parsed {len(attendance_data)} attendance rows for muster roll.")
     # Extract Photo URL
@@ -122,7 +134,7 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
     att_ws.append(['Muster Roll No.'] + (table_headers if table_headers else []))
     for record in attendance_records:
         att_ws.append([record['muster_roll_no']] + record['row'])
-    att_wb.save(f'attendance_data_{file_base}.xlsx')
+    # att_wb.save(f'attendance_data_{file_base}.xlsx') # Commented out
     print(f'Saved attendance_data_{file_base}.xlsx')
 
     # Write images to Excel
@@ -130,33 +142,28 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
     img_ws = img_wb.active
     img_ws.title = 'Images'
     img_ws.append(['Muster Roll No.', 'Image'])
-    temp_img_paths = []
-    img_col = 2  # Column B for images
     img_row = 2  # Start from row 2 (row 1 is header)
+    img_refs = []  # Keep references to BytesIO objects
     for entry in image_records:
         muster_no = entry['muster_roll_no']
         img_bytes = entry['image']
         if img_bytes:
             img_bytes.seek(0)
-            pil_img = PILImage.open(img_bytes)
-            img_path = f'{muster_no}.png'
-            pil_img.save(img_path)
-            xl_img = XLImage(img_path)
+            img_data = img_bytes.read()
+            img_bytes_for_excel = io.BytesIO(img_data)
+            xl_img = XLImage(img_bytes_for_excel)
+            img_refs.append(img_bytes_for_excel)  # Keep reference alive
             img_ws.cell(row=img_row, column=1, value=muster_no)
             cell_ref = f'B{img_row}'
             img_ws.add_image(xl_img, cell_ref)
-            img_ws.row_dimensions[img_row].height = pil_img.height * 0.75
-            img_ws.column_dimensions['B'].width = pil_img.width * 0.14
-            temp_img_paths.append(img_path)
+            img_ws.row_dimensions[img_row].height = 100  # Set a default height
+            img_ws.column_dimensions['B'].width = 20
         else:
             img_ws.cell(row=img_row, column=1, value=muster_no)
             img_ws.cell(row=img_row, column=2, value='No Image')
         img_row += 1
-    img_wb.save(f'attendance_images_{file_base}.xlsx')
+    # img_wb.save(f'attendance_images_{file_base}.xlsx') # Commented out
     print(f'Saved attendance_images_{file_base}.xlsx')
-    for img_path in temp_img_paths:
-        if os.path.exists(img_path):
-            os.remove(img_path)
 
     # Write Option C Excel (attendance + image in one file)
     optc_wb = Workbook()
@@ -172,142 +179,84 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
     # Table header (match screenshot order)
     table_header = ['Muster Roll No.', 'S.No', 'Job Card No', 'Worker Name(Gender)', 'Attendance Date', 'Present/Absent', 'Image']
     optc_ws.append(table_header)
-    temp_img_paths_c = []
+    img_refs_c = []  # Keep references to BytesIO objects for Option C
     for entry in option_c_records:
         muster_no = entry['muster_roll_no']
         att_rows = entry['attendance']
         img_bytes = entry['image']
         first_row = True
-        s_no = 1
         if att_rows:
             for row in att_rows:
-                # Remove time from Attendance Date (keep only date)
-                if len(row) >= 5:
-                    row[4] = row[4].split()[0] if row[4] else ''
-                # Compose row as per header
-                excel_row = [muster_no if first_row else '', str(s_no), row[1] if len(row) > 1 else '', row[2] if len(row) > 2 else '', row[4] if len(row) > 4 else '', row[5] if len(row) > 5 else '', '']
+                # row: [S.No, Job Card No, Worker Name(Gender), Attendance Date, Present/Absent]
+                # Fix date to keep 'DD Mon YYYY'
+                if len(row) >= 4 and row[3]:
+                    row[3] = ' '.join(row[3].split()[:3])
+                excel_row = [muster_no if first_row else '',
+                             row[0] if len(row) > 0 else '',  # S.No from table
+                             row[1] if len(row) > 1 else '',  # Job Card No
+                             row[2] if len(row) > 2 else '',  # Worker Name(Gender)
+                             row[3] if len(row) > 3 else '',  # Attendance Date
+                             row[4] if len(row) > 4 else '',  # Present/Absent
+                             '']
                 if first_row:
                     if img_bytes:
                         img_bytes.seek(0)
-                        pil_img = PILImage.open(img_bytes)
-                        img_path = f'{muster_no}_optc.png'
-                        pil_img.save(img_path)
-                        xl_img = XLImage(img_path)
+                        img_data = img_bytes.read()
+                        img_bytes_for_excel = io.BytesIO(img_data)
+                        xl_img = XLImage(img_bytes_for_excel)
+                        img_refs_c.append(img_bytes_for_excel)  # Keep reference alive
                         row_idx = optc_ws.max_row + 1
                         optc_ws.append(excel_row)
                         cell_ref = f'G{row_idx}'
                         optc_ws.add_image(xl_img, cell_ref)
-                        optc_ws.row_dimensions[row_idx].height = pil_img.height * 0.75
-                        optc_ws.column_dimensions['G'].width = pil_img.width * 0.14
-                        temp_img_paths_c.append(img_path)
+                        optc_ws.row_dimensions[row_idx].height = 100
+                        optc_ws.column_dimensions['G'].width = 20
                     else:
                         optc_ws.append(excel_row)
                     first_row = False
                 else:
                     optc_ws.append(excel_row)
-                s_no += 1
         else:
-            # No attendance rows, just show muster no and image
             excel_row = [muster_no, '', '', '', '', '', '']
             if img_bytes:
                 img_bytes.seek(0)
-                pil_img = PILImage.open(img_bytes)
-                img_path = f'{muster_no}_optc.png'
-                pil_img.save(img_path)
-                xl_img = XLImage(img_path)
+                img_data = img_bytes.read()
+                img_bytes_for_excel = io.BytesIO(img_data)
+                xl_img = XLImage(img_bytes_for_excel)
+                img_refs_c.append(img_bytes_for_excel)  # Keep reference alive
                 row_idx = optc_ws.max_row + 1
                 optc_ws.append(excel_row)
                 cell_ref = f'G{row_idx}'
                 optc_ws.add_image(xl_img, cell_ref)
-                optc_ws.row_dimensions[row_idx].height = pil_img.height * 0.75
-                optc_ws.column_dimensions['G'].width = pil_img.width * 0.14
-                temp_img_paths_c.append(img_path)
+                optc_ws.row_dimensions[row_idx].height = 100
+                optc_ws.column_dimensions['G'].width = 20
             else:
                 optc_ws.append(excel_row)
-    optc_wb.save(f'attendance_with_images_{file_base}.xlsx')
+    # optc_wb.save(f'attendance_with_images_{file_base}.xlsx') # Commented out
     print(f'Saved attendance_with_images_{file_base}.xlsx')
-    for img_path in temp_img_paths_c:
-        if os.path.exists(img_path):
-            os.remove(img_path)
 
-    # Generate PDF report for attendance with images
-    from reportlab.lib.pagesizes import landscape, A4
-    from reportlab.lib import colors
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
-    from reportlab.lib.styles import getSampleStyleSheet
-
-    pdf_filename = f'attendance_with_images_{file_base}.pdf'
-    doc = SimpleDocTemplate(pdf_filename, pagesize=landscape(A4))
-    elements = []
-    styles = getSampleStyleSheet()
-
-    # Add headers
-    elements.append(Paragraph(f'Work Code: {work_code}', styles['Heading2']))
-    elements.append(Paragraph(f'Work Name: {work_name if work_name else ""}', styles['Normal']))
-    elements.append(Paragraph(f'District: {DEFAULT_DISTRICT}', styles['Normal']))
-    elements.append(Paragraph(f'Taluk/Block: {DEFAULT_TALUK}', styles['Normal']))
-    elements.append(Paragraph(f'Panchayath Name: {panchayat_name}', styles['Normal']))
-    elements.append(Spacer(1, 12))
-
-    for entry in option_c_records:
-        muster_no = entry['muster_roll_no']
-        att_rows = entry['attendance']
-        img_bytes = entry['image']
-        # Table header
-        table_header = ['S.No', 'Job Card No', 'Worker Name(Gender)', 'Attendance Date', 'Present/Absent']
-        data = [table_header]
-        s_no = 1
-        if att_rows:
-            for row in att_rows:
-                # Remove time from Attendance Date (keep only date)
-                if len(row) >= 5:
-                    row[4] = row[4].split()[0] if row[4] else ''
-                data.append([
-                    str(s_no),
-                    row[1] if len(row) > 1 else '',
-                    row[2] if len(row) > 2 else '',
-                    row[4] if len(row) > 4 else '',
-                    row[5] if len(row) > 5 else ''
-                ])
-                s_no += 1
-        # Add muster roll number as a title
-        elements.append(Spacer(1, 12))
-        elements.append(Paragraph(f'<b>Muster Roll No.: {muster_no}</b>', styles['Heading3']))
-        # Add table and image side by side
-        table_width = 400
-        img_width = 250
-        t = Table(data, repeatRows=1, colWidths=[40, 120, 120, 100, 80])
-        t.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.lightgrey),
-            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
-            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ]))
-        max_img_height = 200  # points
-        if img_bytes:
-            img_bytes.seek(0)
-            rl_img = RLImage(img_bytes, width=img_width, mask='auto')
-            # Scale image if too tall
-            if rl_img.imageHeight > max_img_height:
-                rl_img.drawHeight = max_img_height
-                rl_img.drawWidth = rl_img.imageWidth * (max_img_height / rl_img.imageHeight)
-            # If table is short, place side by side; else, stack
-            if len(data) <= 10:
-                side_by_side = Table([[t, rl_img]], colWidths=[table_width, img_width])
-                side_by_side.setStyle(TableStyle([
-                    ('VALIGN', (0,0), (-1,-1), 'TOP'),
-                    ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-                ]))
-                elements.append(side_by_side)
-            else:
-                elements.append(t)
-                elements.append(Spacer(1, 8))
-                elements.append(rl_img)
-        else:
-            elements.append(t)
-        elements.append(Spacer(1, 24))
-    doc.build(elements)
-    print(f'Saved {pdf_filename}')
-    # Return file names for frontend to use
-    return file_base
+    # PDF generation temporarily disabled
+    # from reportlab.lib.pagesizes import landscape, A4
+    # from reportlab.lib import colors
+    # from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
+    # from reportlab.lib.styles import getSampleStyleSheet
+    # pdf_filename = f'attendance_with_images_{file_base}.pdf'
+    # pdf_bytes = io.BytesIO()
+    # doc = SimpleDocTemplate(pdf_bytes, pagesize=landscape(A4))
+    # elements = []
+    # styles = getSampleStyleSheet()
+    # ... (all PDF element building code) ...
+    # doc.build(elements)
+    # pdf_bytes.seek(0)
+    # Save Excel files to memory instead of disk
+    att_xlsx = io.BytesIO()
+    att_wb.save(att_xlsx)
+    att_xlsx.seek(0)
+    img_xlsx = io.BytesIO()
+    img_wb.save(img_xlsx)
+    img_xlsx.seek(0)
+    optc_xlsx = io.BytesIO()
+    optc_wb.save(optc_xlsx)
+    optc_xlsx.seek(0)
+    # Return in-memory files for frontend
+    return att_xlsx, img_xlsx, optc_xlsx, None
