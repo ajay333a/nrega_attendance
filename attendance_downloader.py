@@ -4,6 +4,7 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XLImage
 from bs4 import BeautifulSoup
 from datetime import datetime
+from openpyxl.styles import Alignment, Font
 
 STARTING_URL = "https://mnregaweb4.nic.in/nregaarch/View_NMMS_atten_date_dtl_rpt.aspx?page=&short_name=KN&state_name=KARNATAKA&state_code=15&district_name=BALLARI&district_code=1505&block_name=SIRUGUPPA&block_code=1505007&"
 
@@ -131,6 +132,13 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
     att_wb = Workbook()
     att_ws = att_wb.active
     att_ws.title = 'Attendance Data'
+    # Add header section
+    att_ws.append([f'Work Code: {work_code}'])
+    att_ws.append([f'Work Name: {work_name if work_name else ""}'])
+    att_ws.append([f'District: {DEFAULT_DISTRICT}'])
+    att_ws.append([f'Taluk/Block: {DEFAULT_TALUK}'])
+    att_ws.append([f'Panchayath Name: {panchayat_name}'])
+    att_ws.append([])
     att_ws.append(['Muster Roll No.'] + (table_headers if table_headers else []))
     for record in attendance_records:
         att_ws.append([record['muster_roll_no']] + record['row'])
@@ -141,8 +149,15 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
     img_wb = Workbook()
     img_ws = img_wb.active
     img_ws.title = 'Images'
+    # Add header section
+    img_ws.append([f'Work Code: {work_code}'])
+    img_ws.append([f'Work Name: {work_name if work_name else ""}'])
+    img_ws.append([f'District: {DEFAULT_DISTRICT}'])
+    img_ws.append([f'Taluk/Block: {DEFAULT_TALUK}'])
+    img_ws.append([f'Panchayath Name: {panchayat_name}'])
+    img_ws.append([])
     img_ws.append(['Muster Roll No.', 'Image'])
-    img_row = 2  # Start from row 2 (row 1 is header)
+    img_row = img_ws.max_row + 1  # Start after header
     img_refs = []  # Keep references to BytesIO objects
     for entry in image_records:
         muster_no = entry['muster_roll_no']
@@ -153,13 +168,23 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
             img_bytes_for_excel = io.BytesIO(img_data)
             xl_img = XLImage(img_bytes_for_excel)
             img_refs.append(img_bytes_for_excel)  # Keep reference alive
-            img_ws.cell(row=img_row, column=1, value=muster_no)
+            cell = img_ws.cell(row=img_row, column=1, value=muster_no)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.font = Font(size=16, bold=True)
             cell_ref = f'B{img_row}'
             img_ws.add_image(xl_img, cell_ref)
-            img_ws.row_dimensions[img_row].height = 100  # Set a default height
+            # Dynamically set row height based on image height
+            from PIL import Image as PILImage
+            img_bytes_for_excel.seek(0)
+            pil_img = PILImage.open(img_bytes_for_excel)
+            img_height_px = pil_img.height
+            img_height_pt = img_height_px * 0.75  # 1 px ≈ 0.75 pt
+            img_ws.row_dimensions[img_row].height = img_height_pt
             img_ws.column_dimensions['B'].width = 20
         else:
-            img_ws.cell(row=img_row, column=1, value=muster_no)
+            cell = img_ws.cell(row=img_row, column=1, value=muster_no)
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.font = Font(size=16, bold=True)
             img_ws.cell(row=img_row, column=2, value='No Image')
         img_row += 1
     # img_wb.save(f'attendance_images_{file_base}.xlsx') # Commented out
