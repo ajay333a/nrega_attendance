@@ -20,11 +20,20 @@ def get_attendance_data(url):
         print(f"Error fetching attendance data: {e}")
         return None, None, None, None
     soup = BeautifulSoup(response.content, 'html.parser')
-    # Work Name
+    # Work Name (extract text after <b>Work Name</b>)
     work_name = None
-    work_name_elem = soup.find(id="ContentPlaceHolder1_lbl_dtl")
-    if work_name_elem:
-        work_name = work_name_elem.text.strip()
+    for b in soup.find_all('b'):
+        if b.text.strip().startswith('Work Name'):
+            # Get the next_sibling text after the <b>Work Name ...</b>
+            next_text = b.next_sibling
+            if next_text:
+                work_name = str(next_text).strip(' :\u00a0-')
+            break
+    # Fallback to previous method if not found
+    if not work_name:
+        work_name_elem = soup.find(id="ContentPlaceHolder1_lbl_dtl")
+        if work_name_elem:
+            work_name = work_name_elem.text.strip()
     # Attendance Table
     attendance_data = []
     tables = soup.find_all('table')
@@ -34,14 +43,11 @@ def get_attendance_data(url):
     attendance_table = tables[-1]
     rows = attendance_table.find_all('tr')
     header_cells = [th.text.strip() for th in rows[0].find_all(['th', 'td'])]
-    print(f"Parsed header row: {header_cells}")
     col_map = {name: idx for idx, name in enumerate(header_cells)}
-    # Only extract these columns
     wanted_cols = ['S.No', 'Job Card No', 'Worker Name (Gender)', 'Attendance Date', 'Present/Absent']
     for row in rows[1:]:
         cols = row.find_all('td')
         if cols and any(c.get_text(strip=True) for c in cols):
-            # Find worker name in a <span> with id containing 'lbl_workerName_'
             name_td = ''
             for td in cols:
                 span = td.find('span', id=lambda x: x and 'lbl_workerName_' in x)
@@ -55,10 +61,7 @@ def get_attendance_data(url):
                 cols[col_map.get('Attendance Date', -1)].get_text(strip=True) if 'Attendance Date' in col_map else '',
                 cols[col_map.get('Present/Absent', -1)].get_text(strip=True) if 'Present/Absent' in col_map else ''
             ]
-            print(f"Extracted row: {extracted}")
             attendance_data.append(extracted)
-    print(f"Parsed {len(attendance_data)} attendance rows for muster roll.")
-    # Extract Photo URL
     photo_url = None
     img_link = soup.find('a', text='Click here for large image')
     if img_link and img_link.has_attr('href'):
@@ -125,7 +128,7 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
         # For option C
         option_c_records.append({'muster_roll_no': msr_no, 'attendance': att_data, 'image': img_bytes if photo_url else None})
         if progress_callback:
-            progress_callback(f"Muster Roll {msr_no} parsed")
+            progress_callback(f"Muster Roll {msr_no} parsed ,")
     file_base = f"{work_code}_{attendance_date}".replace('/', '_')
 
     # Write attendance data to Excel
@@ -139,7 +142,7 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
     att_ws.append([f'Taluk/Block: {DEFAULT_TALUK}'])
     att_ws.append([f'Panchayath Name: {panchayat_name}'])
     att_ws.append([])
-    att_ws.append(['Muster Roll No.'] + (table_headers if table_headers else []))
+    
     for record in attendance_records:
         att_ws.append([record['muster_roll_no']] + record['row'])
     # att_wb.save(f'attendance_data_{file_base}.xlsx') # Commented out
@@ -255,24 +258,12 @@ def run_attendance_downloader(panchayat_name, panchayat_code, fin_year, work_cod
                 optc_ws.add_image(xl_img, cell_ref)
                 optc_ws.row_dimensions[row_idx].height = 100
                 optc_ws.column_dimensions['G'].width = 20
-            else:
+    else:
                 optc_ws.append(excel_row)
     # optc_wb.save(f'attendance_with_images_{file_base}.xlsx') # Commented out
     print(f'Saved attendance_with_images_{file_base}.xlsx')
 
-    # PDF generation temporarily disabled
-    # from reportlab.lib.pagesizes import landscape, A4
-    # from reportlab.lib import colors
-    # from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
-    # from reportlab.lib.styles import getSampleStyleSheet
-    # pdf_filename = f'attendance_with_images_{file_base}.pdf'
-    # pdf_bytes = io.BytesIO()
-    # doc = SimpleDocTemplate(pdf_bytes, pagesize=landscape(A4))
-    # elements = []
-    # styles = getSampleStyleSheet()
-    # ... (all PDF element building code) ...
-    # doc.build(elements)
-    # pdf_bytes.seek(0)
+
     # Save Excel files to memory instead of disk
     att_xlsx = io.BytesIO()
     att_wb.save(att_xlsx)

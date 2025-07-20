@@ -1,42 +1,64 @@
-# Attendance download process
+# Attendance Download
 
-You have to go to the attendance portal, then select state and date, after which the website will give list of Districts in which you have to click on given district which will take you to page that gives you list of taluks, click on taluk again, which will take you to panchayaths, now you click on Muster rools of Panchayath which will display a table for muster rolls, when clicked on a muster roll number it will take you to muster roll data which I want to download for all muster rolls for a given workcode.
+## Let's first create the scrit for downloading data after that lets add Streamlit UI for user interface
 
-Attendance Portal URL: https://mnregaweb4.nic.in/nregaarch/View_NMMS_atten_date_new.aspx?fin_year=2024-2025&Digest=HNrisV4bhHnb7Gve3mAKYQ
+### URL for direct Data
+As there was a long list pages and clicks between data and process, I will provide you with direct link, but you have edit the link at various locations and join it with the variables I give you to go to the direct Muster roll page.
 
-For first page State element name = 'ctl00$ContentPlaceHolder1$ddlstate'
-For first page date element name = 'ctl00$ContentPlaceHolder1$ddl_attendance'
+link: https://mnregaweb4.nic.in/nregaarch/View_NMMS_atten_date_dtl_rpt.aspx?page=&short_name=KN&state_name=KARNATAKA&state_code=15&district_name=BALLARI&district_code=1505&block_name=SIRUGUPPA&block_code=1505007&panchayat_name=BALAKUNDHI&panchayat_code=1505007016&fin_year=2024-2025&source=&work_code=1505007016/IC/93393042892330899&msr_no=16950&AttendanceDate=03/07/2025&Digest=ttm2SylWYUsKMSsmiDjONQ
 
-There is no CAPTCHA requirements.
+parts of the link:
+1. starting = https://mnregaweb4.nic.in/nregaarch/View_NMMS_atten_date_dtl_rpt.aspx?page=&short_name=KN&state_name=KARNATAKA&state_code=15&district_name=BALLARI&district_code=1505&block_name=SIRUGUPPA&block_code=1505007&
+This part of link is fine as we are setting Karnataka, Ballari and Siruguppa as default
 
-## Implementation
+Ask for the rest of elements in the CLI or APP
 
-1. Setup Selenium and Streamlit
+2. panchayth name = panchayat_name=BALAKUNDHI&panchayat_code=1505007016
+    - two elements are needed to be provided here
+    1. Panchayath Name
+    2. Panchayath Code
 
-2. Outline of Selenium Automation
-The script will:
-1. Open the portal URL.
-2. Set Karnataka state, Ballari distict, Siruguppa Block/Taluk as defaults
-3. For the selected Panchayath and Date find all Muster Rolls for the given Work Code.
-For each Muster Roll, scrape data using the element names which I will provide you again when you reach Muster roll data page.
-4. Elements to be scrapped from final page 1. Attendance table 2. Attendance Image
+3. financial year = 
+    fin_year=2024-2025
 
-## Streamlit UI
-1. Set Karnataka state, Ballari distict, Siruguppa Block/Taluk as defaults
-2. Ask for Panchayath, Date, Work Code
-3. On submit, run the Selenium script and provide the results for download
+4. source will add work code of the work
+    source=&work_code?
 
-## Downloading Data
+5. msr_no is Muster Roll number for which I will give a range and loop through them to collect data for all
 
-Combine all data into a 2 excel files one for attendance data other for images in a table format:
+6. AttendendanceDate is the date which you will ask input for
 
-1. Attendance data
---------------------------------------------------------------------------------
-| Muster Roll No.   | Attendance table                                          |
---------------------------------------------------------------------------------
+7. Digest , i cannot see any pattern for that so, ask input for that firld to
 
-2. Images and muster roll
 
---------------------------------------------
-| Muster Roll No. | Image                   |
---------------------------------------------
+you should open a link
+
+link = starting+panchayath_name+panchayath_code+fin_year+source=&+work_code+msr_no+Date+digest
+
+you should open that link and search for data and download it into two excel files
+
+
+
+
+Now you are under acheiving
+
+url --[enter details in form] - State table(appears on same page after filling the fields in the input boxes) --> url --> Districts table(Find Ballari district and No of Muster rolls)
+
+
+
+## state table 
+state table element is in the element
+<div id="RepPr1" class="table-responsive">
+
+try to find table by id
+
+## District table
+district table element is in
+<div id="RepPr1" class="table-responsive">
+try to find the table by id
+
+I want to go deeper, just how you found href links for district, find href for taluk and Panchayaths too
+## Block/Taluk table
+block/taluk table is in element
+<div id="RepPr1" class="table-responsive">
+
