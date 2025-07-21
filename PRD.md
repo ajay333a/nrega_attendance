@@ -1,6 +1,6 @@
 # Attendance Download
 
-## Let's first create the scrit for downloading data after that lets add Streamlit UI for user interface
+## Let's first create the script for downloading data after that lets add Streamlit UI for user interface
 
 ### URL for direct Data
 As there was a long list pages and clicks between data and process, I will provide you with direct link, but you have edit the link at various locations and join it with the variables I give you to go to the direct Muster roll page.
